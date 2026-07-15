@@ -77,7 +77,3 @@ curl -X POST http://localhost:18080/api/orders \
 ```
 
 터미널 1에 `POST /api/orders` SERVER span과 JDBC CLIENT span이 같은 traceId로 출력되면 정상.
-
-## 컨벤션
-
-공통 개발 컨벤션: [apm-kitae.md](./apm-kitae.md)
