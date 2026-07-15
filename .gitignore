@@ -3,3 +3,9 @@
 
 # OS
 .DS_Store
+
+# OMC plugin state
+.omc/
+
+# IDE
+.idea/
