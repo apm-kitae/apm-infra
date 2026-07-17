@@ -60,6 +60,32 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
+    container_name: apm-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: apm-local
+      # 같은 compose 네트워크의 INTERNAL 리스너로 접속 (EXTERNAL은 호스트 전용)
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      # ProtobufFile serde — OTLP 스키마로 value를 JSON 디코딩 (proto는 opentelemetry-proto v1.10.0)
+      KAFKA_CLUSTERS_0_SERDE_0_NAME: ProtobufFile
+      KAFKA_CLUSTERS_0_SERDE_0_PROPERTIES_PROTOBUFFILESDIR: /protofiles
+      KAFKA_CLUSTERS_0_SERDE_0_PROPERTIES_PROTOBUFMESSAGENAMEBYTOPIC_TRACES: opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest
+      KAFKA_CLUSTERS_0_SERDE_0_PROPERTIES_PROTOBUFMESSAGENAMEBYTOPIC_METRICS: opentelemetry.proto.collector.metrics.v1.ExportMetricsServiceRequest
+    volumes:
+      - ./kafka-ui/proto:/protofiles:ro
+    ports:
+      - "${KAFKA_UI_PORT:-8081}:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.156.0
     container_name: apm-otel-collector
