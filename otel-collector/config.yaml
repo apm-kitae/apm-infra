@@ -16,6 +16,18 @@ processors:
 exporters:
   debug:
     verbosity: detailed
+  kafka:
+    brokers:
+      - kafka:29092            # 컨테이너 간 INTERNAL 리스너
+    partition_traces_by_id: true   # 메시지 키 = trace_id → 같은 트레이스의 span이 같은 파티션에 적재
+    traces:
+      topic: traces
+      encoding: otlp_proto     # debug 출력과 동일 구조의 OTLP Protobuf 바이너리
+    metrics:
+      topic: metrics
+      encoding: otlp_proto
+    producer:
+      compression: zstd        # 기본 none — 텔레메트리는 반복 패턴이 많아 압축 효과 큼
 
 service:
   extensions: [health_check]
@@ -23,12 +35,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug]
+      exporters: [debug, kafka]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug]
+      exporters: [debug, kafka]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug]
+      exporters: [debug]       # 로그는 토픽 미전송 (traces/metrics만 Kafka 적재)
