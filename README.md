@@ -9,6 +9,7 @@ apm-kitae 인프라 실행 구성. Docker Compose로 로컬 개발/데모 환경
 | mysql | mysql:8.0 | 3306 | apm-demo 로컬 개발용 DB |
 | otel-collector | otel/opentelemetry-collector-contrib:0.156.0 | 4317 (OTLP gRPC), 4318 (OTLP HTTP), 13133 (health) | 관측 데이터 수집 게이트웨이 |
 | kafka | apache/kafka:4.0.0 | 9092 (EXTERNAL) | 텔레메트리 버퍼 (Collector → 컨슈머) |
+| kafka-ui | ghcr.io/kafbat/kafka-ui:v1.5.0 | 8081 | 토픽·파티션·컨슈머 그룹 관찰 UI |
 
 > 이후 추가 예정: ClickHouse, MinIO, Grafana
 
@@ -42,6 +43,7 @@ docker compose down -v    # 볼륨까지 제거 (DB 초기화)
 | OTEL_HTTP_PORT | 4318 | Collector OTLP HTTP 호스트 포트 |
 | OTEL_HEALTH_PORT | 13133 | Collector health_check 호스트 포트 |
 | KAFKA_PORT | 9092 | Kafka EXTERNAL 리스너 호스트 포트 (호스트의 컨슈머 앱·CLI 접속용) |
+| KAFKA_UI_PORT | 8081 | kafka-ui 웹 접속 호스트 포트 (8080은 로컬 Spring Boot·타 컨테이너와 충돌 잦음) |
 
 > `MYSQL_USER`/`MYSQL_PASSWORD`/`MYSQL_DATABASE`는 볼륨이 비어 있을 때 최초 1회만 적용된다. 값 변경 시 `docker compose down -v` 후 재기동.
 
@@ -100,6 +102,24 @@ docker exec apm-kafka /opt/kafka/bin/kafka-console-consumer.sh \
 ```
 
 apm-demo API 호출 후 위 컨슈머에 `Partition:N  <trace_id>  <바이너리>` 형식으로 출력되면 정상.
+
+### kafka-ui
+
+`http://localhost:8081` 접속 — 클러스터명 `apm-local`, `kafka:29092` INTERNAL 리스너로 연결.
+
+- **Topics**: `traces` / `metrics` 토픽, 파티션 수(3), 파티션별 오프셋
+- **Messages**: 토픽 선택 → Messages 탭 — 키(trace_id 16진수)와 파티션 번호 확인. 값은 ProtobufFile serde가 OTLP 스키마로 JSON 디코딩해 표시 (Protobuf 바이너리 원문 해설은 [Kafka 적재 데이터 읽기 문서](./docs/Kafka-적재-데이터-읽기-문서.md))
+- **Consumers**: 컨슈머 그룹별 lag — 컨슈머 앱(Spring Boot) 개발 시 파티션 분배·처리 지연 관찰용
+
+value 디코딩 (ProtobufFile serde):
+
+| 토픽 | 매핑 메시지 타입 |
+|------|------------------|
+| traces | `opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest` |
+| metrics | `opentelemetry.proto.collector.metrics.v1.ExportMetricsServiceRequest` |
+
+- proto 스키마: `kafka-ui/proto/` (opentelemetry-proto v1.10.0, 컨테이너에 `/protofiles`로 마운트)
+- 디코딩된 JSON의 `traceId`/`spanId`는 base64 표시 — 메시지 키의 16진수와 같은 값의 다른 인코딩
 
 ### 수신 검증
 
