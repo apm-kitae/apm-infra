@@ -10,8 +10,9 @@ apm-kitae 인프라 실행 구성. Docker Compose로 로컬 개발/데모 환경
 | otel-collector | otel/opentelemetry-collector-contrib:0.156.0 | 4317 (OTLP gRPC), 4318 (OTLP HTTP), 13133 (health) | 관측 데이터 수집 게이트웨이 |
 | kafka | apache/kafka:4.0.0 | 9092 (EXTERNAL) | 텔레메트리 버퍼 (Collector → 컨슈머) |
 | kafka-ui | ghcr.io/kafbat/kafka-ui:v1.5.0 | 8081 | 토픽·파티션·컨슈머 그룹 관찰 UI |
+| clickhouse | clickhouse/clickhouse-server:25.3.14.14 | 8123 (HTTP), 9000 (native) | 텔레메트리 영속 저장소 |
 
-> 이후 추가 예정: ClickHouse, MinIO, Grafana
+> 이후 추가 예정: MinIO, Grafana
 
 ## 실행
 
@@ -44,8 +45,14 @@ docker compose down -v    # 볼륨까지 제거 (DB 초기화)
 | OTEL_HEALTH_PORT | 13133 | Collector health_check 호스트 포트 |
 | KAFKA_PORT | 9092 | Kafka EXTERNAL 리스너 호스트 포트 (호스트의 컨슈머 앱·CLI 접속용) |
 | KAFKA_UI_PORT | 8081 | kafka-ui 웹 접속 호스트 포트 (8080은 로컬 Spring Boot·타 컨테이너와 충돌 잦음) |
+| CLICKHOUSE_HTTP_PORT | 8123 | ClickHouse HTTP 호스트 포트 (clickhouse-client HTTP·Grafana) |
+| CLICKHOUSE_TCP_PORT | 9000 | ClickHouse native TCP 호스트 포트 (컨슈머 앱 드라이버) |
+| CLICKHOUSE_DB | otel | 초기 생성 DB |
+| CLICKHOUSE_USER | apm | 애플리케이션 계정 |
+| CLICKHOUSE_PASSWORD | 1234 | 애플리케이션 계정 비밀번호 |
 
 > `MYSQL_USER`/`MYSQL_PASSWORD`/`MYSQL_DATABASE`는 볼륨이 비어 있을 때 최초 1회만 적용된다. 값 변경 시 `docker compose down -v` 후 재기동.
+> ClickHouse 초기화 SQL(`clickhouse/init/`)도 볼륨이 비어 있을 때만 실행된다. 스키마 변경 시 `docker compose down -v` 후 재기동.
 
 ## 접속 확인
 
@@ -133,3 +140,31 @@ curl -X POST http://localhost:18080/api/orders \
 ```
 
 터미널 1에 `POST /api/orders` SERVER span과 JDBC CLIENT span이 같은 traceId로 출력되면 정상.
+
+## ClickHouse
+
+텔레메트리 영속 저장소. OTel ClickHouse exporter 스키마를 준용한 wide denormalized table. 컨슈머 앱(Spring Boot, 별도 레포)이 Kafka에서 소비한 OTLP를 역직렬화해 INSERT하는 대상 — 이 레포는 컨테이너와 스키마까지만 담당한다.
+
+| 테이블 | 단위 | 용도 |
+|--------|------|------|
+| `otel_traces` | span 1개 = 1행 | 트레이스. `ParentSpanId → SpanId`로 트리 재구성, `TraceId` bloom filter로 단건 조회 |
+| `otel_metrics_gauge` | 데이터포인트 | 순간값 (jvm.memory.used, jvm.thread.count) |
+| `otel_metrics_sum` | 데이터포인트 | 누적 카운터 (jvm.cpu.time, jvm.class.loaded) |
+| `otel_metrics_histogram` | 데이터포인트 | 분포 (http.server.request.duration, jvm.gc.duration) |
+
+- 스키마 초기화: `clickhouse/init/*.sql` (볼륨이 빈 첫 기동 시 파일명 순 실행)
+- 전 테이블 MergeTree, `PARTITION BY toDate(...)`, TTL 72시간
+- 설계 근거(wide table 채택, metrics 타입 분리, Exemplar로 metrics→traces 연결): [ClickHouse 스키마 문서](./docs/ClickHouse-스키마-문서.md)
+
+### 접속 확인
+
+```bash
+# clickhouse-client (컨테이너 내부)
+docker exec -it apm-clickhouse clickhouse-client -u apm --password 1234
+
+# 테이블 목록
+docker exec apm-clickhouse clickhouse-client -u apm --password 1234 --query "SHOW TABLES FROM otel"
+
+# HTTP 인터페이스 (호스트)
+curl -s "http://localhost:8123/?user=apm&password=1234" --data-binary "SELECT count() FROM otel.otel_traces"
+```
