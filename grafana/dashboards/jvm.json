@@ -1,0 +1,123 @@
+{
+  "uid": "apm-jvm",
+  "title": "APM / JVM",
+  "description": "jvm.memory.used·jvm.thread.count는 UpDownCounter라 sum 테이블 적재 — 누적값=현재 수준이므로 delta 없이 플롯",
+  "tags": ["apm"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "힙 메모리 사용량 (풀 합산)",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 20 } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT t, ServiceName, sum(v) AS heap_used FROM ( SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, ServiceName, toString(Attributes) AS series, argMax(Value, TimeUnix) AS v FROM otel.otel_metrics_sum WHERE MetricName = 'jvm.memory.used' AND Attributes['jvm.memory.type'] = 'heap' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, ServiceName, series ) GROUP BY t, ServiceName ORDER BY t"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "스레드 수",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT t, ServiceName, sum(v) AS threads FROM ( SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, ServiceName, toString(Attributes) AS series, argMax(Value, TimeUnix) AS v FROM otel.otel_metrics_sum WHERE MetricName = 'jvm.thread.count' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, ServiceName, series ) GROUP BY t, ServiceName ORDER BY t"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "CPU 사용률 (최근 구간)",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, ServiceName, avg(Value) AS cpu FROM otel.otel_metrics_gauge WHERE MetricName = 'jvm.cpu.recent_utilization' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, ServiceName ORDER BY t"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "분당 GC 횟수 (jvm.gc.duration, cumulative delta)",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT t, gc, sum(delta) AS collections FROM ( SELECT t, gc, greatest(0, cnt - lagInFrame(cnt, 1, cnt) OVER (PARTITION BY series ORDER BY t)) AS delta FROM ( SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, Attributes['jvm.gc.name'] AS gc, toString(Attributes) AS series, max(Count) AS cnt FROM otel.otel_metrics_histogram WHERE MetricName = 'jvm.gc.duration' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, gc, series ) ) GROUP BY t, gc ORDER BY t"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "로드된 클래스 수 (jvm.class.count)",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 18 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT t, ServiceName, sum(v) AS classes FROM ( SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, ServiceName, toString(Attributes) AS series, argMax(Value, TimeUnix) AS v FROM otel.otel_metrics_sum WHERE MetricName = 'jvm.class.count' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, ServiceName, series ) GROUP BY t, ServiceName ORDER BY t"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "평균 GC 소요 시간 (jvm.gc.duration, cumulative delta)",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 18 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT t, gc, sum(dSum) / nullIf(sum(dCnt), 0) AS avg_gc FROM ( SELECT t, gc, greatest(0, cnt - lagInFrame(cnt, 1, cnt) OVER w) AS dCnt, greatest(0, s - lagInFrame(s, 1, s) OVER w) AS dSum FROM ( SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, Attributes['jvm.gc.name'] AS gc, toString(Attributes) AS series, max(Count) AS cnt, max(Sum) AS s FROM otel.otel_metrics_histogram WHERE MetricName = 'jvm.gc.duration' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, gc, series ) WINDOW w AS (PARTITION BY series ORDER BY t) ) GROUP BY t, gc ORDER BY t"
+        }
+      ]
+    }
+  ],
+  "templating": { "list": [] }
+}

@@ -1,0 +1,13 @@
+# ./grafana/dashboards 의 JSON을 APM 폴더로 자동 로드
+# UI 편집 불가(allowUiUpdates false) — 대시보드 수정은 JSON 파일 편집 후 재기동
+apiVersion: 1
+
+providers:
+  - name: apm
+    folder: APM
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      # compose가 ./grafana/dashboards 를 이 경로로 마운트
+      path: /var/lib/grafana/dashboards

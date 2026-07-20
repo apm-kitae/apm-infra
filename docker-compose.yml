@@ -138,7 +138,43 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  grafana:
+    image: grafana/grafana-oss:12.4.3
+    container_name: apm-grafana
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-apm}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-1234}
+      # 첫 기동 시 플러그인 다운로드 (외부 네트워크 필요, 이후 grafana-data 볼륨에 유지)
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource 4.19.0
+      # provisioning yml($CLICKHOUSE_*) 보간용 — ClickHouse 계정 재사용
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-apm}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-1234}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-otel}
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      # Grafana 내부 DB(사용자·UI 생성 대시보드·플러그인). provisioning 대시보드는 UI 편집 불가 — 파일이 원본
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   mysql-data:
   kafka-data:
   clickhouse-data:
+  grafana-data:
