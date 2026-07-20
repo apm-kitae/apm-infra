@@ -60,8 +60,8 @@ TTL toDateTime(Timestamp) + toIntervalHour(72)
 
 | 테이블 | 타입별 컬럼 | 실제 메트릭 (apm-demo) |
 |--------|-----------|------------------------|
-| `otel_metrics_gauge` | `Value` | jvm.memory.used, jvm.thread.count, jvm.cpu.recent_utilization |
-| `otel_metrics_sum` | `Value`, `AggregationTemporality`, `IsMonotonic` | jvm.cpu.time, jvm.class.loaded |
+| `otel_metrics_gauge` | `Value` | jvm.cpu.recent_utilization |
+| `otel_metrics_sum` | `Value`, `AggregationTemporality`, `IsMonotonic` | jvm.cpu.time, jvm.class.loaded, jvm.memory.used, jvm.thread.count (UpDownCounter도 sum으로 적재) |
 | `otel_metrics_histogram` | `Count`, `Sum`, `BucketCounts`, `ExplicitBounds`, `Min`, `Max` | http.server.request.duration, jvm.gc.duration, db.client.connections.use_time |
 
 3종만 만드는 이유: OTel 표준은 5종(gauge/sum/histogram/exp_histogram/summary)이지만, JVM+HTTP+Hikari 자동 계측이
