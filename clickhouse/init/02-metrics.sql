@@ -2,7 +2,8 @@
 -- JVM/HTTP/Hikari 계측이 쓰는 3종만 생성 (exp_histogram·summary 제외)
 -- 공통 컬럼 + 타입별 컬럼 구조. Exemplars.TraceId 로 traces와 연결 (FK 아님)
 
--- gauge — 순간값 (jvm.memory.used, jvm.thread.count, jvm.cpu.recent_utilization)
+-- gauge — 순간값 (jvm.cpu.recent_utilization)
+-- 주의: jvm.memory.used·jvm.thread.count는 UpDownCounter라 gauge가 아닌 sum 테이블에 적재됨 (실데이터 확인)
 CREATE TABLE IF NOT EXISTS otel.otel_metrics_gauge
 (
     ResourceAttributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
@@ -36,7 +37,7 @@ ORDER BY (ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(TimeUnix))
 TTL toDateTime(TimeUnix) + toIntervalHour(72)
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 
--- sum — 누적 카운터 (jvm.cpu.time, jvm.class.loaded)
+-- sum — 카운터·UpDownCounter (jvm.cpu.time, jvm.class.loaded, jvm.memory.used, jvm.thread.count)
 CREATE TABLE IF NOT EXISTS otel.otel_metrics_sum
 (
     ResourceAttributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),

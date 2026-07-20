@@ -1,0 +1,112 @@
+{
+  "uid": "apm-traces",
+  "title": "APM / 트레이스 검색",
+  "description": "느린 루트 span에서 TraceId를 복사해 trace_id 변수에 넣으면 해당 트레이스의 span 트리(ParentSpanId 연결)를 확인",
+  "tags": ["apm"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "응답 시간 분포 (루트 span) — 점을 확대해 느린 요청 시점 확인",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "points", "pointSize": 6, "fillOpacity": 0 } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT Timestamp AS t, SpanName, Duration / 1000000 AS ms FROM otel.otel_traces WHERE ParentSpanId = '' AND ServiceName = '${service}' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime ORDER BY t LIMIT 5000"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "type": "table",
+      "title": "느린 트레이스 (루트 span, Duration 내림차순) — TraceId 클릭 시 아래 워터폴로 연결",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+      "fieldConfig": { "defaults": {}, "overrides": [
+        { "matcher": { "id": "byName", "options": "duration_ms" }, "properties": [{ "id": "unit", "value": "ms" }] },
+        { "matcher": { "id": "byName", "options": "TraceId" }, "properties": [{ "id": "links", "value": [
+          { "title": "워터폴 보기", "url": "/d/apm-traces?var-trace_id=${__data.fields.TraceId}&${service:queryparam}&${__url_time_range}" }
+        ] }] }
+      ] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT Timestamp, TraceId, SpanName, ServiceName, round(Duration / 1e6, 1) AS duration_ms, StatusCode FROM otel.otel_traces WHERE ParentSpanId = '' AND ServiceName = '${service}' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime ORDER BY Duration DESC LIMIT 50"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "traces",
+      "title": "트레이스 워터폴 — TraceId = $trace_id",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 18 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+          "editorType": "sql",
+          "queryType": "traces",
+          "format": 3,
+          "rawSql": "SELECT TraceId AS traceID, SpanId AS spanID, ParentSpanId AS parentSpanID, ServiceName AS serviceName, SpanName AS operationName, toUnixTimestamp64Milli(Timestamp) AS startTime, Duration / 1000000 AS duration FROM otel.otel_traces WHERE TraceId = '${trace_id}' ORDER BY startTime LIMIT 200"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "span 상세 — TraceId = $trace_id (Timestamp 순, ParentSpanId로 트리 연결)",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 30 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+      "fieldConfig": { "defaults": {}, "overrides": [{ "matcher": { "id": "byName", "options": "duration_ms" }, "properties": [{ "id": "unit", "value": "ms" }] }] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT Timestamp, SpanId, ParentSpanId, SpanName, ServiceName, round(Duration / 1e6, 2) AS duration_ms, StatusCode, SpanKind FROM otel.otel_traces WHERE TraceId = '${trace_id}' ORDER BY Timestamp LIMIT 200"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "서비스",
+        "type": "query",
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+        "query": "SELECT DISTINCT ServiceName FROM otel.otel_traces ORDER BY ServiceName",
+        "refresh": 2,
+        "current": {},
+        "options": []
+      },
+      {
+        "name": "trace_id",
+        "label": "TraceId",
+        "type": "textbox",
+        "query": "",
+        "current": { "text": "", "value": "" }
+      }
+    ]
+  }
+}

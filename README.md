@@ -11,8 +11,9 @@ apm-kitae 인프라 실행 구성. Docker Compose로 로컬 개발/데모 환경
 | kafka | apache/kafka:4.0.0 | 9092 (EXTERNAL) | 텔레메트리 버퍼 (Collector → 컨슈머) |
 | kafka-ui | ghcr.io/kafbat/kafka-ui:v1.5.0 | 8081 | 토픽·파티션·컨슈머 그룹 관찰 UI |
 | clickhouse | clickhouse/clickhouse-server:25.3.14.14 | 8123 (HTTP), 9000 (native) | 텔레메트리 영속 저장소 |
+| grafana | grafana/grafana-oss:12.4.3 | 3000 | ClickHouse 대시보드 (HTTP 성능·JVM·트레이스 검색) |
 
-> 이후 추가 예정: MinIO, Grafana
+> 이후 추가 예정: MinIO
 
 ## 실행
 
@@ -50,6 +51,9 @@ docker compose down -v    # 볼륨까지 제거 (DB 초기화)
 | CLICKHOUSE_DB | otel | 초기 생성 DB |
 | CLICKHOUSE_USER | apm | 애플리케이션 계정 |
 | CLICKHOUSE_PASSWORD | 1234 | 애플리케이션 계정 비밀번호 |
+| GRAFANA_PORT | 3000 | Grafana 웹 접속 호스트 포트 (로컬 프론트 개발 서버와 충돌 시 13000 등으로 변경) |
+| GRAFANA_USER | apm | Grafana admin 계정 |
+| GRAFANA_PASSWORD | 1234 | Grafana admin 비밀번호 |
 
 > `MYSQL_USER`/`MYSQL_PASSWORD`/`MYSQL_DATABASE`는 볼륨이 비어 있을 때 최초 1회만 적용된다. 값 변경 시 `docker compose down -v` 후 재기동.
 > ClickHouse 초기화 SQL(`clickhouse/init/`)도 볼륨이 비어 있을 때만 실행된다. 스키마 변경 시 `docker compose down -v` 후 재기동.
@@ -148,8 +152,8 @@ curl -X POST http://localhost:18080/api/orders \
 | 테이블 | 단위 | 용도 |
 |--------|------|------|
 | `otel_traces` | span 1개 = 1행 | 트레이스. `ParentSpanId → SpanId`로 트리 재구성, `TraceId` bloom filter로 단건 조회 |
-| `otel_metrics_gauge` | 데이터포인트 | 순간값 (jvm.memory.used, jvm.thread.count) |
-| `otel_metrics_sum` | 데이터포인트 | 누적 카운터 (jvm.cpu.time, jvm.class.loaded) |
+| `otel_metrics_gauge` | 데이터포인트 | 순간값 (jvm.cpu.recent_utilization) |
+| `otel_metrics_sum` | 데이터포인트 | 카운터·UpDownCounter (jvm.cpu.time, jvm.memory.used, jvm.thread.count) |
 | `otel_metrics_histogram` | 데이터포인트 | 분포 (http.server.request.duration, jvm.gc.duration) |
 
 - 스키마 초기화: `clickhouse/init/*.sql` (볼륨이 빈 첫 기동 시 파일명 순 실행)
@@ -167,4 +171,27 @@ docker exec apm-clickhouse clickhouse-client -u apm --password 1234 --query "SHO
 
 # HTTP 인터페이스 (호스트)
 curl -s "http://localhost:8123/?user=apm&password=1234" --data-binary "SELECT count() FROM otel.otel_traces"
+```
+
+## Grafana
+
+ClickHouse에 적재된 traces/metrics 대시보드. datasource와 대시보드 전부 provisioning 파일로 관리 — `docker compose up`만으로 수동 설정 없이 동작한다.
+
+- 접속: http://localhost:3000 (계정 `apm`/`1234`, `.env`로 변경 가능)
+- datasource: `grafana/provisioning/datasources/clickhouse.yml` — 컨테이너 네트워크 `clickhouse:8123` 연결, 계정은 compose 환경변수(`CLICKHOUSE_*`) 보간
+- 대시보드: `grafana/dashboards/*.json` — APM 폴더로 자동 로드. UI 편집 불가(파일이 원본), 수정은 JSON 편집 후 `docker compose restart grafana`
+
+| 대시보드 | 데이터 | 내용 |
+|----------|--------|------|
+| APM / HTTP 성능 | `otel_metrics_histogram` | 분당 요청 수·평균 응답 시간(라우트별), 기간 p50/p95/p99 (버킷 상한 근사) |
+| APM / JVM | `otel_metrics_sum`·`gauge`·`histogram` | 힙 메모리, 스레드 수, CPU 사용률, 분당 GC 횟수·평균 GC 소요, 로드된 클래스 수 |
+| APM / 트레이스 검색 | `otel_traces` | 응답 시간 산점도 → 느린 트레이스 목록에서 **TraceId 클릭** → 워터폴(Traces 패널, span 계층·구간 막대) + span 상세 테이블 |
+
+메트릭은 OTel Java Agent 기본값인 **cumulative** temporality로 적재되므로, 요청 수·GC 횟수 같은 카운터 패널은 시리즈별 인접 구간 차분(window `lagInFrame`)으로, 기간 백분위는 창 양끝 `BucketCounts` 차분으로 계산한다. 데이터가 비어 있으면 apm-consumer가 metrics 토픽을 소비 중인지 먼저 확인.
+
+### 확인
+
+```bash
+curl -s http://localhost:3000/api/health                                        # 기동 확인
+curl -s -u apm:1234 http://localhost:3000/api/datasources/uid/clickhouse-otel/health  # datasource 연결
 ```
