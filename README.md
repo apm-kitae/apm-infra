@@ -11,7 +11,7 @@ apm-kitae 인프라 실행 구성. Docker Compose로 로컬 개발/데모 환경
 | kafka | apache/kafka:4.0.0 | 9092 (EXTERNAL) | 텔레메트리 버퍼 (Collector → 컨슈머) |
 | kafka-ui | ghcr.io/kafbat/kafka-ui:v1.5.0 | 8081 | 토픽·파티션·컨슈머 그룹 관찰 UI |
 | clickhouse | clickhouse/clickhouse-server:25.3.14.14 | 8123 (HTTP), 9000 (native) | 텔레메트리 영속 저장소 |
-| grafana | grafana/grafana-oss:12.4.3 | 3000 | ClickHouse 대시보드 (HTTP 성능·JVM·트레이스 검색) |
+| grafana | grafana/grafana-oss:12.4.3 | 3000 | ClickHouse 대시보드 (서비스 맵·서비스 상세·HTTP 성능·JVM·트레이스 검색) |
 
 > 이후 추가 예정: MinIO
 
@@ -181,13 +181,29 @@ ClickHouse에 적재된 traces/metrics 대시보드. datasource와 대시보드 
 - datasource: `grafana/provisioning/datasources/clickhouse.yml` — 컨테이너 네트워크 `clickhouse:8123` 연결, 계정은 compose 환경변수(`CLICKHOUSE_*`) 보간
 - 대시보드: `grafana/dashboards/*.json` — APM 폴더로 자동 로드. UI 편집 불가(파일이 원본), 수정은 JSON 편집 후 `docker compose restart grafana`
 
-| 대시보드 | 데이터 | 내용 |
-|----------|--------|------|
-| APM / HTTP 성능 | `otel_metrics_histogram` | 분당 요청 수·평균 응답 시간(라우트별), 기간 p50/p95/p99 (버킷 상한 근사) |
-| APM / JVM | `otel_metrics_sum`·`gauge`·`histogram` | 힙 메모리, 스레드 수, CPU 사용률, 분당 GC 횟수·평균 GC 소요, 로드된 클래스 수 |
-| APM / 트레이스 검색 | `otel_traces` | 응답 시간 산점도 → 느린 트레이스 목록에서 **TraceId 클릭** → 워터폴(Traces 패널, span 계층·구간 막대) + span 상세 테이블 |
+| 대시보드 | 근거 데이터 | 내용 |
+|----------|------------|------|
+| APM / 서비스 맵 | `otel_traces` (span) | 서비스 간 호출 그래프(Node Graph). 노드 = 받은 요청·평균 지연·에러 비율, 엣지 = 서비스 경계를 넘은 호출. 서비스명 클릭 → 서비스 상세 |
+| APM / 서비스 상세 | `otel_traces` + `otel_metrics_*` | `$service` 선택. 요청 수·에러율·p95, 분당 요청·에러, 엔드포인트별 지표, 느린 요청(TraceId 클릭 → 워터폴), 힙·스레드·CPU |
+| APM / HTTP 성능 | `otel_metrics_histogram` | 분당 요청 수·평균 응답 시간(서비스·라우트별), 기간 p50/p95/p99 (버킷 상한 근사) |
+| APM / JVM | `otel_metrics_sum`·`gauge`·`histogram` | 힙 메모리, 스레드 수, CPU 사용률, 분당 GC 횟수·평균 GC 소요, 로드된 클래스 수 (전부 서비스별) |
+| APM / 트레이스 검색 | `otel_traces` | 응답 시간 산점도 → 느린 트레이스 목록에서 **TraceId 클릭** → 워터폴(span 계층·구간 막대) + span 상세 + span event |
 
-메트릭은 OTel Java Agent 기본값인 **cumulative** temporality로 적재되므로, 요청 수·GC 횟수 같은 카운터 패널은 시리즈별 인접 구간 차분(window `lagInFrame`)으로, 기간 백분위는 창 양끝 `BucketCounts` 차분으로 계산한다. 데이터가 비어 있으면 apm-consumer가 metrics 토픽을 소비 중인지 먼저 확인.
+**메트릭 기반 대시보드**(HTTP 성능·JVM)는 OTel Java Agent 기본값인 **cumulative** temporality로 적재되므로, 요청 수·GC 횟수 같은 카운터 패널은 서비스·시리즈별 인접 구간 차분(window `lagInFrame`)으로, 기간 백분위는 창 양끝 `BucketCounts` 차분으로 계산한다. 데이터가 비어 있으면 apm-consumer가 metrics 토픽을 소비 중인지 먼저 확인.
+
+**span 기반 대시보드**(서비스 맵·서비스 상세)는 차분 없이 span을 직접 집계한다. 같은 엔드포인트라도 p95가 HTTP 성능 대시보드와 다르게 나오는데, 그쪽은 히스토그램 버킷 상한 근사이고 이쪽은 실측 분포라 **정상이다**. 헬스체크·Swagger 요청(`GET /actuator%`, `GET /swagger%`, `GET /v3/api-docs%`)은 제외한다 — 빼지 않으면 요청 수의 3분의 1이 헬스체크가 된다.
+
+> span 기반 집계는 **전량 저장**을 전제로 한다. 현재 샘플러를 지정하지 않아 Agent 기본값 `parentbased_always_on`이 적용된다. 나중에 tail 샘플링을 도입하면 요청 수가 실제보다 작아지므로 메트릭 기반으로 옮겨야 한다.
+
+### 서비스 맵 읽는 법
+
+| 보이는 것 | 뜻 |
+|-----------|-----|
+| 노드가 하나만 | 상대 서비스에 OTel Agent가 붙지 않았거나, 그 서비스가 이 시간 범위에서 요청을 받지 않았다 |
+| 노드는 둘인데 엣지가 없음 | 서비스 간 호출이 없었거나 `traceparent`가 전파되지 않았다 |
+| 노드 테두리에 빨강 비율 | 그 서비스가 받은 요청의 에러 비율 |
+
+계측 누락을 확인할 때는 시간 범위를 `now-2m` 정도로 좁힌다. TTL이 72시간이라 창이 넓으면 과거 span 때문에 노드가 계속 보인다.
 
 ### 확인
 
