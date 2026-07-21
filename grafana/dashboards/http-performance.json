@@ -1,7 +1,7 @@
 {
   "uid": "apm-http",
   "title": "APM / HTTP 성능",
-  "description": "http.server.request.duration (cumulative histogram) — 시리즈별 delta로 요청 수·지연 계산",
+  "description": "http.server.request.duration (cumulative histogram) — 서비스·시리즈별 delta로 요청 수·지연 계산. /actuator/health 처럼 여러 서비스에 같은 route가 있으면 ServiceName 으로 분리해야 값이 섞이지 않는다",
   "tags": ["apm"],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -13,7 +13,7 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "분당 요청 수 (라우트별)",
+      "title": "분당 요청 수 (서비스·라우트별)",
       "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] },
@@ -24,14 +24,14 @@
           "editorType": "sql",
           "queryType": "timeseries",
           "format": 0,
-          "rawSql": "SELECT t, route, sum(delta) AS requests FROM ( SELECT t, route, greatest(0, cnt - lagInFrame(cnt, 1, cnt) OVER (PARTITION BY series ORDER BY t)) AS delta FROM ( SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, Attributes['http.route'] AS route, toString(Attributes) AS series, max(Count) AS cnt FROM otel.otel_metrics_histogram WHERE MetricName = 'http.server.request.duration' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, route, series ) ) GROUP BY t, route ORDER BY t"
+          "rawSql": "SELECT t, ServiceName, route, sum(delta) AS requests FROM ( SELECT t, ServiceName, route, greatest(0, cnt - lagInFrame(cnt, 1, cnt) OVER (PARTITION BY ServiceName, series ORDER BY t)) AS delta FROM ( SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, ServiceName, Attributes['http.route'] AS route, toString(Attributes) AS series, max(Count) AS cnt FROM otel.otel_metrics_histogram WHERE MetricName = 'http.server.request.duration' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, ServiceName, route, series ) ) GROUP BY t, ServiceName, route ORDER BY t"
         }
       ]
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "평균 응답 시간 (라우트별)",
+      "title": "평균 응답 시간 (서비스·라우트별)",
       "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
@@ -42,7 +42,7 @@
           "editorType": "sql",
           "queryType": "timeseries",
           "format": 0,
-          "rawSql": "SELECT t, route, sum(dSum) / nullIf(sum(dCnt), 0) AS avg_latency FROM ( SELECT t, route, greatest(0, cnt - lagInFrame(cnt, 1, cnt) OVER w) AS dCnt, greatest(0, s - lagInFrame(s, 1, s) OVER w) AS dSum FROM ( SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, Attributes['http.route'] AS route, toString(Attributes) AS series, max(Count) AS cnt, max(Sum) AS s FROM otel.otel_metrics_histogram WHERE MetricName = 'http.server.request.duration' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, route, series ) WINDOW w AS (PARTITION BY series ORDER BY t) ) GROUP BY t, route ORDER BY t"
+          "rawSql": "SELECT t, ServiceName, route, sum(dSum) / nullIf(sum(dCnt), 0) AS avg_latency FROM ( SELECT t, ServiceName, route, greatest(0, cnt - lagInFrame(cnt, 1, cnt) OVER w) AS dCnt, greatest(0, s - lagInFrame(s, 1, s) OVER w) AS dSum FROM ( SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, ServiceName, Attributes['http.route'] AS route, toString(Attributes) AS series, max(Count) AS cnt, max(Sum) AS s FROM otel.otel_metrics_histogram WHERE MetricName = 'http.server.request.duration' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, ServiceName, route, series ) WINDOW w AS (PARTITION BY ServiceName, series ORDER BY t) ) GROUP BY t, ServiceName, route ORDER BY t"
         }
       ]
     },
@@ -50,6 +50,7 @@
       "id": 3,
       "type": "table",
       "title": "기간 p50 / p95 / p99 (느린 순) — 버킷 상한 근사",
+      "description": "히스토그램 버킷 상한으로 근사한 값이라 '서비스 상세' 대시보드의 span 실측 p95 와 다르게 나오는 것이 정상이다",
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 9 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
       "fieldConfig": { "defaults": {}, "overrides": [
@@ -64,7 +65,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT route, total AS requests, if(total = 0, 0, bounds[least(arrayFirstIndex(c -> c >= 0.50 * total, cum), length(bounds))]) AS p50, if(total = 0, 0, bounds[least(arrayFirstIndex(c -> c >= 0.95 * total, cum), length(bounds))]) AS p95, if(total = 0, 0, bounds[least(arrayFirstIndex(c -> c >= 0.99 * total, cum), length(bounds))]) AS p99 FROM ( SELECT route, arrayCumSum(counts) AS cum, cum[length(cum)] AS total, bounds FROM ( SELECT route, sumForEach(diff) AS counts, any(bounds) AS bounds FROM ( SELECT Attributes['http.route'] AS route, toString(Attributes) AS series, arrayMap((a, b) -> toUInt64(greatest(0, toInt64(a) - toInt64(b))), argMax(BucketCounts, TimeUnix), argMin(BucketCounts, TimeUnix)) AS diff, any(ExplicitBounds) AS bounds FROM otel.otel_metrics_histogram WHERE MetricName = 'http.server.request.duration' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY route, series ) GROUP BY route ) ) WHERE total > 0 ORDER BY p95 DESC"
+          "rawSql": "SELECT ServiceName, route, total AS requests, if(total = 0, 0, bounds[least(arrayFirstIndex(c -> c >= 0.50 * total, cum), length(bounds))]) AS p50, if(total = 0, 0, bounds[least(arrayFirstIndex(c -> c >= 0.95 * total, cum), length(bounds))]) AS p95, if(total = 0, 0, bounds[least(arrayFirstIndex(c -> c >= 0.99 * total, cum), length(bounds))]) AS p99 FROM ( SELECT ServiceName, route, arrayCumSum(counts) AS cum, cum[length(cum)] AS total, bounds FROM ( SELECT ServiceName, route, sumForEach(diff) AS counts, any(bounds) AS bounds FROM ( SELECT ServiceName, Attributes['http.route'] AS route, toString(Attributes) AS series, arrayMap((a, b) -> toUInt64(greatest(0, toInt64(a) - toInt64(b))), argMax(BucketCounts, TimeUnix), argMin(BucketCounts, TimeUnix)) AS diff, any(ExplicitBounds) AS bounds FROM otel.otel_metrics_histogram WHERE MetricName = 'http.server.request.duration' AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY ServiceName, route, series ) GROUP BY ServiceName, route ) ) WHERE total > 0 ORDER BY p95 DESC"
         }
       ]
     }
