@@ -1,0 +1,487 @@
+{
+  "uid": "apm-service-detail",
+  "title": "APM / 서비스 상세",
+  "description": "서비스 하나의 RED 지표와 JVM 상태. 요청 지표는 span 실측이라 메트릭 기반인 'HTTP 성능' 대시보드와 숫자가 다를 수 있다. service 변수는 Server span 기준이라 요청 패널과 모집단이 같고, 메트릭 파이프라인만 안 붙은 서비스를 고르면 JVM 패널 3개만 빈다",
+  "tags": [
+    "apm"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "요청 수",
+      "description": "많고 적음에 좋고 나쁨이 없어 색을 쓰지 않는다",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-otel"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT count() AS requests FROM otel.otel_traces WHERE ServiceName = ${service:sqlstring} AND SpanKind = 'Server' AND SpanName NOT LIKE 'GET /actuator%' AND SpanName NOT LIKE 'GET /swagger%' AND SpanName NOT LIKE 'GET /v3/api-docs%' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "에러율",
+      "description": "트래픽이 없으면 0%가 아니라 No data 로 표시된다 — 계측이 죽은 것과 정상인 것을 구분하기 위해서다",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-otel"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(count() > 0, countIf(StatusCode = 'Error') / count(), NULL) AS error_rate FROM otel.otel_traces WHERE ServiceName = ${service:sqlstring} AND SpanKind = 'Server' AND SpanName NOT LIKE 'GET /actuator%' AND SpanName NOT LIKE 'GET /swagger%' AND SpanName NOT LIKE 'GET /v3/api-docs%' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "p95 응답 시간",
+      "description": "span 실측 분포다. quantileExact 라 새로고침해도 값이 흔들리지 않는다. 임계값은 결제 호출을 포함한 주문 경로(수백 ms)를 기준으로 잡았다",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-otel"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(count() > 0, round(quantileExact(0.95)(Duration) / 1e6, 1), NULL) AS p95_ms FROM otel.otel_traces WHERE ServiceName = ${service:sqlstring} AND SpanKind = 'Server' AND SpanName NOT LIKE 'GET /actuator%' AND SpanName NOT LIKE 'GET /swagger%' AND SpanName NOT LIKE 'GET /v3/api-docs%' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "분당 요청·에러 수",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-otel"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "errors"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT toStartOfInterval(Timestamp, INTERVAL 1 minute) AS t, count() AS requests, countIf(StatusCode = 'Error') AS errors FROM otel.otel_traces WHERE ServiceName = ${service:sqlstring} AND SpanKind = 'Server' AND SpanName NOT LIKE 'GET /actuator%' AND SpanName NOT LIKE 'GET /swagger%' AND SpanName NOT LIKE 'GET /v3/api-docs%' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime GROUP BY t ORDER BY t"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "엔드포인트별 (요청 많은 순)",
+      "description": "span 실측이다. 'HTTP 성능' 대시보드는 메트릭 히스토그램의 버킷 상한 근사라 같은 엔드포인트라도 p95 가 다르게 나온다",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-otel"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95_ms"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT SpanName, count() AS requests, round(quantileExact(0.95)(Duration) / 1e6, 1) AS p95_ms, countIf(StatusCode = 'Error') / count() AS error_rate FROM otel.otel_traces WHERE ServiceName = ${service:sqlstring} AND SpanKind = 'Server' AND SpanName NOT LIKE 'GET /actuator%' AND SpanName NOT LIKE 'GET /swagger%' AND SpanName NOT LIKE 'GET /v3/api-docs%' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime GROUP BY SpanName ORDER BY requests DESC LIMIT 50"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "느린 요청 (수신 span, Duration 내림차순) — TraceId 클릭 시 워터폴로 이동",
+      "description": "이 서비스가 받은 요청이 기준이다. 다른 서비스가 호출해 들어온 것도 포함된다",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-otel"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duration_ms"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "TraceId"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "워터폴 보기",
+                    "url": "/d/apm-traces?var-trace_id=${__data.fields.TraceId}&${service:queryparam}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT Timestamp, TraceId, SpanName, round(Duration / 1e6, 1) AS duration_ms, StatusCode FROM otel.otel_traces WHERE ServiceName = ${service:sqlstring} AND SpanKind = 'Server' AND SpanName NOT LIKE 'GET /actuator%' AND SpanName NOT LIKE 'GET /swagger%' AND SpanName NOT LIKE 'GET /v3/api-docs%' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime ORDER BY Duration DESC LIMIT 50"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "힙 메모리 사용량 (풀 합산)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 23
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-otel"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "fillOpacity": 20
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT t, sum(v) AS heap_used FROM ( SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, toString(Attributes) AS series, argMax(Value, TimeUnix) AS v FROM otel.otel_metrics_sum WHERE MetricName = 'jvm.memory.used' AND Attributes['jvm.memory.type'] = 'heap' AND ServiceName = ${service:sqlstring} AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, series ) GROUP BY t ORDER BY t"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "스레드 수",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 23
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-otel"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT t, sum(v) AS threads FROM ( SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, toString(Attributes) AS series, argMax(Value, TimeUnix) AS v FROM otel.otel_metrics_sum WHERE MetricName = 'jvm.thread.count' AND ServiceName = ${service:sqlstring} AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t, series ) GROUP BY t ORDER BY t"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "CPU 사용률 (최근 구간)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 23
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-otel"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT toStartOfInterval(TimeUnix, INTERVAL 1 minute) AS t, avg(Value) AS cpu FROM otel.otel_metrics_gauge WHERE MetricName = 'jvm.cpu.recent_utilization' AND ServiceName = ${service:sqlstring} AND TimeUnix >= $__fromTime AND TimeUnix <= $__toTime GROUP BY t ORDER BY t"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "서비스",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse-otel"
+        },
+        "query": "SELECT DISTINCT ServiceName FROM otel.otel_traces WHERE SpanKind = 'Server' ORDER BY ServiceName",
+        "refresh": 2,
+        "current": {},
+        "options": []
+      }
+    ]
+  }
+}
