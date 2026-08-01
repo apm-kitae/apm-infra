@@ -52,7 +52,7 @@ TTL toDateTime(Timestamp) + toIntervalHour(72)
 - **ORDER BY**는 primary key 겸 sparse index. 조회 패턴이 "서비스별·이름별·시간순"이라 이 순서. `TraceId`는 여기 없음 — 무작위 값이라 정렬 키로 부적합
 - **TraceId 단건 조회**는 그래서 `bloom_filter` skip index로 처리. `EXPLAIN indexes=1`에서 `idx_trace_id` 사용 확인됨
 - **PARTITION BY toDate**: 날짜별 파티션 → TTL이 파티션 단위로 통째 삭제(`ttl_only_drop_parts=1`)돼 효율적
-- **TTL 72시간**: 학습용이라 짧게. Kafka retention(24h)보다 길게 둬 컨슈머 지연·재처리 여유 확보
+- **TTL 30일**: 주·월 단위 추이 조회가 목적. Kafka retention(24h)보다 길어 컨슈머 지연·재처리 여유도 확보된다
 
 ## 4. metrics — 타입마다 테이블 분리
 
