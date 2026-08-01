@@ -157,7 +157,7 @@ curl -X POST http://localhost:18080/api/orders \
 | `otel_metrics_histogram` | 데이터포인트 | 분포 (http.server.request.duration, jvm.gc.duration) |
 
 - 스키마 초기화: `clickhouse/init/*.sql` (볼륨이 빈 첫 기동 시 파일명 순 실행)
-- 전 테이블 MergeTree, `PARTITION BY toDate(...)`, TTL 72시간
+- 전 테이블 MergeTree, `PARTITION BY toDate(...)`, TTL 30일
 - 설계 근거(wide table 채택, metrics 타입 분리, Exemplar로 metrics→traces 연결): [ClickHouse 스키마 문서](./docs/ClickHouse-스키마-문서.md)
 
 ### 접속 확인

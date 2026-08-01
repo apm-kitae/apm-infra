@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS otel.otel_metrics_gauge
 ENGINE = MergeTree
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(TimeUnix))
-TTL toDateTime(TimeUnix) + toIntervalHour(72)
+TTL toDateTime(TimeUnix) + toIntervalDay(30)
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 
 -- sum — 카운터·UpDownCounter (jvm.cpu.time, jvm.class.loaded, jvm.memory.used, jvm.thread.count)
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS otel.otel_metrics_sum
 ENGINE = MergeTree
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(TimeUnix))
-TTL toDateTime(TimeUnix) + toIntervalHour(72)
+TTL toDateTime(TimeUnix) + toIntervalDay(30)
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 
 -- histogram — 분포 (http.server.request.duration, jvm.gc.duration, db.client.connections.use_time)
@@ -110,5 +110,5 @@ CREATE TABLE IF NOT EXISTS otel.otel_metrics_histogram
 ENGINE = MergeTree
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(TimeUnix))
-TTL toDateTime(TimeUnix) + toIntervalHour(72)
+TTL toDateTime(TimeUnix) + toIntervalDay(30)
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
