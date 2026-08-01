@@ -1,0 +1,211 @@
+{
+  "uid": "apm-service-map",
+  "title": "APM / 서비스 맵",
+  "description": "span 관계(ParentSpanId → SpanId)로 그린 서비스 간 호출 그래프. 노드 테두리는 에러 비율이고, 아래 서비스 목록 표에서 서비스명을 클릭하면 상세 대시보드로 이동한다. 헬스체크·Swagger 요청은 제외했다",
+  "tags": [
+    "apm"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "nodeGraph",
+      "title": "서비스 호출 그래프 — 노드는 받은 요청(SpanKind=Server), 엣지는 서비스 경계를 넘은 호출",
+      "description": "노드가 하나만 보이면 상대 서비스에 OTel Agent가 붙지 않았거나 그 서비스가 이 시간 범위에서 요청을 받지 않은 것이다. 엣지가 없으면 서비스 간 호출 자체가 없었거나 traceparent가 전파되지 않은 것이다",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-otel"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "arc__error"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "에러"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "arc__success"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "정상"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "secondarystat"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "nodes": {
+          "secondaryStatUnit": "ms",
+          "arcs": [
+            {
+              "field": "arc__error",
+              "color": "red"
+            },
+            {
+              "field": "arc__success",
+              "color": "green"
+            }
+          ]
+        },
+        "edges": {
+          "secondaryStatUnit": "ms"
+        },
+        "layoutAlgorithm": "layered"
+      },
+      "targets": [
+        {
+          "refId": "nodes",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT ServiceName AS id, ServiceName AS title, toString(count()) AS mainstat, round(avg(Duration) / 1e6, 1) AS secondarystat, countIf(StatusCode = 'Error') / count() AS arc__error, 1 - countIf(StatusCode = 'Error') / count() AS arc__success FROM otel.otel_traces WHERE SpanKind = 'Server' AND SpanName NOT LIKE 'GET /actuator%' AND SpanName NOT LIKE 'GET /swagger%' AND SpanName NOT LIKE 'GET /v3/api-docs%' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime GROUP BY ServiceName"
+        },
+        {
+          "refId": "edges",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(p.ServiceName, ' → ', c.ServiceName) AS id, p.ServiceName AS source, c.ServiceName AS target, toString(count()) AS mainstat, round(avg(c.Duration) / 1e6, 1) AS secondarystat FROM otel.otel_traces AS c INNER JOIN otel.otel_traces AS p ON c.TraceId = p.TraceId AND c.ParentSpanId = p.SpanId WHERE c.SpanKind = 'Server' AND c.SpanName NOT LIKE 'GET /actuator%' AND c.SpanName NOT LIKE 'GET /swagger%' AND c.SpanName NOT LIKE 'GET /v3/api-docs%' AND c.Timestamp >= $__fromTime AND c.Timestamp <= $__toTime AND c.ServiceName != p.ServiceName AND p.Timestamp >= $__fromTime - INTERVAL 1 MINUTE AND p.Timestamp <= $__toTime AND p.ServiceName IN (SELECT ServiceName FROM otel.otel_traces WHERE SpanKind = 'Server' AND SpanName NOT LIKE 'GET /actuator%' AND SpanName NOT LIKE 'GET /swagger%' AND SpanName NOT LIKE 'GET /v3/api-docs%' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime) GROUP BY source, target"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "서비스 목록 — 서비스명을 클릭하면 상세 대시보드로 이동",
+      "description": "span 실측 기반이다. 메트릭 기반인 'HTTP 성능' 대시보드와 숫자가 다를 수 있다 (그쪽 p95는 히스토그램 버킷 상한 근사)",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse-otel"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95_ms"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_ms"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ServiceName"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "서비스 상세 보기",
+                    "url": "/d/apm-service-detail?var-service=${__data.fields.ServiceName}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse-otel"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT ServiceName, count() AS requests, countIf(StatusCode = 'Error') / count() AS error_rate, round(quantileExact(0.95)(Duration) / 1e6, 1) AS p95_ms, round(avg(Duration) / 1e6, 1) AS avg_ms FROM otel.otel_traces WHERE SpanKind = 'Server' AND SpanName NOT LIKE 'GET /actuator%' AND SpanName NOT LIKE 'GET /swagger%' AND SpanName NOT LIKE 'GET /v3/api-docs%' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime GROUP BY ServiceName ORDER BY requests DESC"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": []
+  }
+}

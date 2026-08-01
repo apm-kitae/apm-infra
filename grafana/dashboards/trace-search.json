@@ -1,7 +1,7 @@
 {
   "uid": "apm-traces",
   "title": "APM / 트레이스 검색",
-  "description": "느린 루트 span에서 TraceId를 복사해 trace_id 변수에 넣으면 해당 트레이스의 span 트리(ParentSpanId 연결)를 확인",
+  "description": "느린 트레이스 목록에서 TraceId를 클릭하면 워터폴(ParentSpanId로 연결된 span 트리) + span 상세(도메인 attribute) + span event를 확인. TraceId를 직접 알고 있으면 trace_id 변수에 넣어도 된다",
   "tags": ["apm"],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -24,7 +24,7 @@
           "editorType": "sql",
           "queryType": "timeseries",
           "format": 0,
-          "rawSql": "SELECT Timestamp AS t, SpanName, Duration / 1000000 AS ms FROM otel.otel_traces WHERE ParentSpanId = '' AND ServiceName = '${service}' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime ORDER BY t LIMIT 5000"
+          "rawSql": "SELECT Timestamp AS t, SpanName, Duration / 1000000 AS ms FROM otel.otel_traces WHERE ParentSpanId = '' AND ServiceName = ${service:sqlstring} AND Timestamp >= $__fromTime AND Timestamp <= $__toTime ORDER BY t LIMIT 5000"
         }
       ]
     },
@@ -47,7 +47,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT Timestamp, TraceId, SpanName, ServiceName, round(Duration / 1e6, 1) AS duration_ms, StatusCode FROM otel.otel_traces WHERE ParentSpanId = '' AND ServiceName = '${service}' AND Timestamp >= $__fromTime AND Timestamp <= $__toTime ORDER BY Duration DESC LIMIT 50"
+          "rawSql": "SELECT Timestamp, TraceId, SpanName, ServiceName, round(Duration / 1e6, 1) AS duration_ms, StatusCode FROM otel.otel_traces WHERE ParentSpanId = '' AND ServiceName = ${service:sqlstring} AND Timestamp >= $__fromTime AND Timestamp <= $__toTime ORDER BY Duration DESC LIMIT 50"
         }
       ]
     },
@@ -65,7 +65,7 @@
           "editorType": "sql",
           "queryType": "traces",
           "format": 3,
-          "rawSql": "SELECT TraceId AS traceID, SpanId AS spanID, ParentSpanId AS parentSpanID, ServiceName AS serviceName, SpanName AS operationName, toUnixTimestamp64Milli(Timestamp) AS startTime, Duration / 1000000 AS duration FROM otel.otel_traces WHERE TraceId = '${trace_id}' ORDER BY startTime LIMIT 200"
+          "rawSql": "SELECT TraceId AS traceID, SpanId AS spanID, ParentSpanId AS parentSpanID, ServiceName AS serviceName, SpanName AS operationName, toUnixTimestamp64Milli(Timestamp) AS startTime, Duration / 1000000 AS duration FROM otel.otel_traces WHERE TraceId = ${trace_id:sqlstring} ORDER BY startTime LIMIT 200"
         }
       ]
     },
@@ -73,6 +73,7 @@
       "id": 2,
       "type": "table",
       "title": "span 상세 — TraceId = $trace_id (Timestamp 순, ParentSpanId로 트리 연결)",
+      "description": "도메인 attribute 는 키별 컬럼으로 뽑는다. SpanAttributes 를 통째로 내보내면 db.statement 등 10여 개가 한 셀에 JSON 으로 들어가 order.id 가 묻힌다",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 30 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
       "fieldConfig": { "defaults": {}, "overrides": [{ "matcher": { "id": "byName", "options": "duration_ms" }, "properties": [{ "id": "unit", "value": "ms" }] }] },
@@ -83,7 +84,26 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT Timestamp, SpanId, ParentSpanId, SpanName, ServiceName, round(Duration / 1e6, 2) AS duration_ms, StatusCode, SpanKind FROM otel.otel_traces WHERE TraceId = '${trace_id}' ORDER BY Timestamp LIMIT 200"
+          "rawSql": "SELECT Timestamp, SpanId, ParentSpanId, SpanName, ServiceName, round(Duration / 1e6, 2) AS duration_ms, StatusCode, SpanKind, SpanAttributes['order.id'] AS order_id, SpanAttributes['order.status'] AS order_status, SpanAttributes['payment.id'] AS payment_id FROM otel.otel_traces WHERE TraceId = ${trace_id:sqlstring} ORDER BY Timestamp LIMIT 200"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "span event — TraceId = $trace_id (시각 순)",
+      "description": "응답 코드만으로는 판별되지 않는 실패가 여기 남는다. order.payment.orphaned·over-cancelled 는 응답이 409(4xx)라 SERVER span 이 Error 로 기록되지 않고, order.payment.outcome-unknown 은 502라 Error 로 기록되지만 'apm-payment 가 500 을 돌려줌'과 구분되지 않는다 — 타임아웃일 때만 결제가 살아남는다. order.status.changed 는 상태 전이 이력으로, attribute 는 덮어쓰기라 최종 상태만 남아 여기서만 확인된다",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 40 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-otel" },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT ServiceName, SpanName, e.1 AS ts, e.2 AS event, e.3['order.id'] AS order_id, e.3['order.status'] AS order_status, e.3['payment.id'] AS payment_id, e.3['exception.type'] AS exc_type, e.3['exception.message'] AS exc_message FROM otel.otel_traces ARRAY JOIN arrayZip(Events.Timestamp, Events.Name, Events.Attributes) AS e WHERE TraceId = ${trace_id:sqlstring} ORDER BY ts LIMIT 200"
         }
       ]
     }
